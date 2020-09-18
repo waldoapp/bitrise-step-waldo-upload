@@ -1,6 +1,6 @@
 # Upload to Waldo
 
-Upload a new build to [Waldo](https://www.waldo.io).
+Uploads a build to [Waldo](https://www.waldo.io).
 
 ## How to use this Step
 
