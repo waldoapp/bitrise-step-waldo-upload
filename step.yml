@@ -13,7 +13,11 @@ host_os_tags:
 project_type_tags:
   - ios
   - android
+  - xamarin
   - react-native
+  - cordova
+  - ionic
+  - flutter
 type_tags:
   - test
 is_requires_admin_user: false
@@ -29,7 +33,7 @@ toolkit:
   bash:
     entry_file: step.sh
 inputs:
-  - build_path: $BITRISE_APP_DIR_PATH
+  - build_path:
     opts:
       title: Build path
       summary: A `.app`, `.ipa`, or `.apk` path.
