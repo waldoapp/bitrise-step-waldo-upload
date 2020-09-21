@@ -47,7 +47,7 @@ inputs:
         - the **Xcode Archive & Export for iOS** Step generates a `.ipa` at `$BITRISE_IPA_PATH`
         - the **Android Build** Step generates a `.apk` at `$BITRISE_APK_PATH`
       is_required: true
-  - upload_token: $WALDO_UPLOAD_TOKEN
+  - upload_token:
     opts:
       title: Waldo upload token
       description: |
@@ -55,9 +55,9 @@ inputs:
         token.
       is_required: true
       is_sensitive: true
-  - include_symbols: "no"
+  - find_symbols: "no"
     opts:
-      title: "Include symbols with the build upload"
+      title: "Find symbols associated with the build upload"
       description: |
         **iOS only.** Attempts to find the symbols associated with the
         specified `.app` build path.

@@ -9,7 +9,7 @@ export WALDO_VARIANT_NAME="$variant_name"
 
 waldo_symbols=""
 
-if [[ -z $symbols_path && $include_symbols == true ]]; then
+if [[ -z $symbols_path && $find_symbols == true ]]; then
     exec "$SCRIPT_DIR"/WaldoCLI.sh "$build_path" --include_symbols
 else
     exec "$SCRIPT_DIR"/WaldoCLI.sh "$build_path" "$symbols_path"
