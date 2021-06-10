@@ -69,6 +69,12 @@ inputs:
         token.
       is_required: true
       is_sensitive: true
+  - variant_name:
+    opts:
+      title: "Waldo variant name"
+      description: |
+        An arbitrary string that can be associated with a build.
+      is_required: false
   - find_symbols: "no"
     opts:
       title: "Find symbols associated with the build upload"
@@ -92,10 +98,4 @@ inputs:
         The symbols path can also be a ZIP archive: `.dSYM.zip` or
         `.xcarchive.zip`.
       category: Symbols
-      is_required: false
-  - variant_name:
-    opts:
-      title: "Waldo variant name"
-      description: |
-        An arbitrary string that can be associated with a build.
       is_required: false
