@@ -16,7 +16,11 @@ case $waldo_build_suffix in
     *)       waldo_build_flavor="unknown" ;;
 esac
 
-export WALDO_USER_AGENT_OVERRIDE="Waldo BitriseStep/${waldo_build_flavor} v${BITRISE_STEP_VERSION}"
+#
+# Unfortunately, the BITRISE_STEP_VERSION environment variable is not always
+# available at this point, so we need to hardcode the version:
+#
+export WALDO_USER_AGENT_OVERRIDE="Waldo BitriseStep/${waldo_build_flavor} v1.1.1"
 
 if [[ -z $symbols_path && $find_symbols == true ]]; then
     exec "$SCRIPT_DIR"/WaldoCLI.sh "$build_path" --include_symbols
