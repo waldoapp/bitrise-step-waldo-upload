@@ -38,14 +38,9 @@ is_requires_admin_user: false
 is_always_run: false
 is_skippable: false
 run_if: ""
-deps:
-  brew:
-  - name: curl
-  apt_get:
-  - name: curl
 toolkit:
-  bash:
-    entry_file: step.sh
+  go:
+    package_name: github.com/waldoapp/bitrise-step-waldo-upload
 inputs:
   - build_path:
     opts:
@@ -63,7 +58,7 @@ inputs:
       is_required: true
   - upload_token:
     opts:
-      title: Waldo upload token
+      title: Upload token
       description: |
         Each application registered in Waldo is associated with a unique upload
         token.
@@ -71,31 +66,31 @@ inputs:
       is_sensitive: true
   - variant_name:
     opts:
-      title: "Waldo variant name"
+      title: "Variant name"
       description: |
         An arbitrary string that can be associated with a build.
       is_required: false
-  - find_symbols: "no"
+  - git_commit:
     opts:
-      title: "Find symbols associated with the build upload"
+      title: "Git commit"
       description: |
-        **iOS only.** Attempts to find the symbols associated with the
-        specified `.app` build path.
-
-        This input is _ignored_ if a symbols path is specified.
-      category: Symbols
+        Hash of originating git commit.
+      category: git configuration
+      is_required: false
+  - git_branch:
+    opts:
+      title: "Git branch"
+      description: |
+        Branch name for originating git commit.
+      category: git configuration
+      is_required: false
+  - is_debug_mode: "no"
+    opts:
+      title: Debug mode?
+      description: |
+        Prints additional debug information if enabled.
+      category: Debug
       is_required: false
       value_options:
         - "yes"
         - "no"
-  - symbols_path:
-    opts:
-      title: "Symbols path"
-      summary: A `.dSYM` or `.xcarchive` path.
-      description: |
-        **iOS only.** A `.dSYM` or `.xcarchive` path.
-
-        The symbols path can also be a ZIP archive: `.dSYM.zip` or
-        `.xcarchive.zip`.
-      category: Symbols
-      is_required: false
