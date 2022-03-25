@@ -11,7 +11,7 @@ import (
 const (
 	wrapperName     = "Go Step"
 	wrapperNameFull = "Waldo Upload Bitrise Step"
-	wrapperVersion  = "2.0.0"
+	wrapperVersion  = "2.1.0"
 )
 
 var (
@@ -35,7 +35,7 @@ func checkInputs() {
 	waldoVariantName = os.Getenv("variant_name")
 	waldoGitCommit = os.Getenv("git_commit")
 	waldoGitBranch = os.Getenv("git_branch")
-	waldoVerbose = os.Getenv("is_debug_mode") == "true"
+	waldoVerbose = os.Getenv("is_debug_mode") == "yes"
 
 	if len(waldoBuildPath) == 0 {
 		fail(fmt.Errorf("Missing required input: ‘build_path’"))
@@ -61,6 +61,10 @@ func displaySummary(uploader *waldo.Uploader) {
 	if waldoVerbose {
 		fmt.Printf("\n")
 		fmt.Printf("Build payload path:  %s\n", summarize(uploader.BuildPayloadPath()))
+        fmt.Printf("CI git branch:       %s\n", summarize(uploader.CIGitBranch()))
+        fmt.Printf("CI git commit:       %s\n", summarize(uploader.CIGitCommit()))
+        fmt.Printf("CI provider:         %s\n", summarize(uploader.CIProvider()))
+        fmt.Printf("Git access:          %s\n", summarize(uploader.GitAccess()))
 		fmt.Printf("Inferred git branch: %s\n", summarize(uploader.InferredGitBranch()))
 		fmt.Printf("Inferred git commit: %s\n", summarize(uploader.InferredGitCommit()))
 	}
