@@ -2,84 +2,252 @@ package main
 
 import (
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httputil"
 	"os"
+	"os/exec"
 	"path/filepath"
-
-	"github.com/waldoapp/waldo-go-lib"
+	"runtime"
+	"strings"
 )
 
 const (
-	wrapperName     = "Go Step"
-	wrapperNameFull = "Waldo Upload Bitrise Step"
-	wrapperVersion  = "2.1.1"
+	stepName    = "Waldo Upload Bitrise Step"
+	stepVersion = "2.2.0"
+
+	stepAssetBaseURL = "https://github.com/waldoapp/waldo-go-agent/releases"
 )
 
 var (
-	waldoBuildPath        string
-	waldoBuildPayloadPath string
-	waldoBuildSuffix      string
-	waldoFlavor           string
-	waldoGitAccess        string
-	waldoGitBranch        string
-	waldoGitCommit        string
-	waldoPlatform         string
-	waldoUploadToken      string
-	waldoVariantName      string
-	waldoVerbose          bool
-	waldoWorkingPath      string
+	stepAgentPath   string
+	stepAssetURL    string
+	stepWorkingPath string
+
+	stepArch         = detectArch()
+	stepAssetVersion = detectAssetVersion()
+	stepPlatform     = detectPlatform()
+	stepVerbose      = detectVerbose()
+
+	inputBuildPath   = os.Getenv("build_path")
+	inputGitCommit   = os.Getenv("git_commit")
+	inputGitBranch   = os.Getenv("git_branch")
+	inputUploadToken = os.Getenv("upload_token")
+	inputVariantName = os.Getenv("variant_name")
+	inputVerbose     = os.Getenv("is_debug_mode") == "yes"
 )
 
 func checkInputs() {
-	waldoBuildPath = os.Getenv("build_path")
-	waldoUploadToken = os.Getenv("upload_token")
-	waldoVariantName = os.Getenv("variant_name")
-	waldoGitCommit = os.Getenv("git_commit")
-	waldoGitBranch = os.Getenv("git_branch")
-	waldoVerbose = os.Getenv("is_debug_mode") == "yes"
-
-	if len(waldoBuildPath) == 0 {
+	if len(inputBuildPath) == 0 {
 		fail(fmt.Errorf("Missing required input: ‘build_path’"))
 	}
 
-	if len(waldoUploadToken) == 0 {
-		waldoUploadToken = os.Getenv("WALDO_UPLOAD_TOKEN")
+	if len(inputUploadToken) == 0 {
+		inputUploadToken = os.Getenv("WALDO_UPLOAD_TOKEN")
 	}
 
-	if len(waldoUploadToken) == 0 {
+	if len(inputUploadToken) == 0 {
 		fail(fmt.Errorf("Missing required input: ‘upload_token’"))
 	}
 }
 
-func displaySummary(uploader *waldo.Uploader) {
-	fmt.Printf("\n")
-	fmt.Printf("Build path:          %s\n", summarize(uploader.BuildPath()))
-	fmt.Printf("Git branch:          %s\n", summarize(uploader.GitBranch()))
-	fmt.Printf("Git commit:          %s\n", summarize(uploader.GitCommit()))
-	fmt.Printf("Upload token:        %s\n", summarizeSecure(uploader.UploadToken()))
-	fmt.Printf("Variant name:        %s\n", summarize(uploader.VariantName()))
+func cleanupTarget() {
+	os.RemoveAll(stepWorkingPath)
+}
 
-	if waldoVerbose {
-		fmt.Printf("\n")
-		fmt.Printf("Build payload path:  %s\n", summarize(uploader.BuildPayloadPath()))
-		fmt.Printf("CI git branch:       %s\n", summarize(uploader.CIGitBranch()))
-		fmt.Printf("CI git commit:       %s\n", summarize(uploader.CIGitCommit()))
-		fmt.Printf("CI provider:         %s\n", summarize(uploader.CIProvider()))
-		fmt.Printf("Git access:          %s\n", summarize(uploader.GitAccess()))
-		fmt.Printf("Inferred git branch: %s\n", summarize(uploader.InferredGitBranch()))
-		fmt.Printf("Inferred git commit: %s\n", summarize(uploader.InferredGitCommit()))
+func detectArch() string {
+	arch := runtime.GOARCH
+
+	switch arch {
+	case "amd64":
+		return "x86_64"
+
+	default:
+		return arch
+	}
+}
+
+func detectAssetVersion() string {
+	if version := os.Getenv("WALDO_UPLOAD_ASSET_VERSION"); len(version) > 0 {
+		return version
 	}
 
-	fmt.Printf("\n")
+	return "latest"
+}
+
+func detectPlatform() string {
+	platform := runtime.GOOS
+
+	switch platform {
+	case "darwin":
+		return "macOS"
+
+	default:
+		return strings.Title(platform)
+	}
+}
+
+func detectVerbose() bool {
+	if verbose := os.Getenv("WALDO_UPLOAD_VERBOSE"); verbose == "1" {
+		return true
+	}
+
+	return false
+}
+
+func determineAgentPath() string {
+	agentName := "waldo-agent"
+
+	if stepPlatform == "windows" {
+		agentName += ".exe"
+	}
+
+	return filepath.Join(stepWorkingPath, "waldo-agent")
+}
+
+func determineAssetURL() string {
+	assetName := fmt.Sprintf("waldo-agent-%s-%s", stepPlatform, stepArch)
+
+	if stepPlatform == "windows" {
+		assetName += ".exe"
+	}
+
+	assetBaseURL := stepAssetBaseURL
+
+	if stepAssetVersion != "latest" {
+		assetBaseURL += "/download/" + stepAssetVersion
+	} else {
+		assetBaseURL += "/latest/download"
+	}
+
+	return assetBaseURL + "/" + assetName
+}
+
+func determineWorkingPath() string {
+	return filepath.Join(os.TempDir(), fmt.Sprintf("WaldoUpdate-%d", os.Getpid()))
 }
 
 func displayVersion() {
-	fmt.Printf("%s %s / %s\n", wrapperNameFull, wrapperVersion, waldo.Version())
+	if stepVerbose {
+		fmt.Printf("%s %s (%s/%s)\n", stepName, stepVersion, stepPlatform, stepArch)
+	}
+}
+
+func downloadAgent() {
+	// fmt.Printf("\nDownloading latest Waldo Agent…\n\n")
+
+	client := &http.Client{}
+
+	req, err := http.NewRequest("GET", stepAssetURL, nil)
+
+	var resp *http.Response
+
+	if err == nil {
+		dumpRequest(req, false)
+
+		resp, err = client.Do(req)
+	}
+
+	if err == nil {
+		defer resp.Body.Close()
+
+		dumpResponse(resp, false)
+
+		if resp.StatusCode < 200 || resp.StatusCode > 299 {
+			fail(fmt.Errorf("Unable to download Waldo Agent, HTTP status: %s", resp.Status))
+		}
+	}
+
+	var file *os.File = nil
+
+	if err == nil {
+		file, err = os.OpenFile(stepAgentPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0775)
+	}
+
+	if err == nil {
+		defer file.Close()
+
+		_, err = io.Copy(file, resp.Body)
+	}
+
+	if err != nil {
+		fail(fmt.Errorf("Unable to download Waldo Agent, error: %v, url: %s", err, stepAssetURL))
+	}
+}
+
+func dumpRequest(req *http.Request, body bool) {
+	if stepVerbose {
+		dump, err := httputil.DumpRequestOut(req, body)
+
+		if err == nil {
+			fmt.Printf("\n--- Request ---\n%s\n", dump)
+		}
+	}
+}
+
+func dumpResponse(resp *http.Response, body bool) {
+	if stepVerbose {
+		dump, err := httputil.DumpResponse(resp, body)
+
+		if err == nil {
+			fmt.Printf("\n--- Response ---\n%s\n", dump)
+		}
+	}
+}
+
+func enrichEnvironment() []string {
+	env := os.Environ()
+
+	setEnvironVar(&env, "WALDO_WRAPPER_NAME_OVERRIDE", stepName)
+	setEnvironVar(&env, "WALDO_WRAPPER_VERSION_OVERRIDE", stepVersion)
+
+	return env
+}
+
+func execAgent() {
+	args := []string{"upload"}
+
+	if len(inputGitBranch) > 0 {
+		args = append(args, "--git_branch", inputGitBranch)
+	}
+
+	if len(inputGitCommit) > 0 {
+		args = append(args, "--git_commit", inputGitCommit)
+	}
+
+	if len(inputUploadToken) > 0 {
+		args = append(args, "--upload_token", inputUploadToken)
+	}
+
+	if len(inputVariantName) > 0 {
+		args = append(args, "--variant_name", inputVariantName)
+	}
+
+	if inputVerbose {
+		args = append(args, "--verbose")
+	}
+
+	if buildPath := os.Getenv("build_path"); len(buildPath) > 0 {
+		args = append(args, buildPath)
+	}
+
+	cmd := exec.Command(stepAgentPath, args...)
+
+	cmd.Env = enrichEnvironment()
+	cmd.Stderr = os.Stderr
+	cmd.Stdout = os.Stdout
+
+	err := cmd.Run()
+
+	if ee, ok := err.(*exec.ExitError); ok {
+		os.Exit(ee.ExitCode())
+	}
 }
 
 func fail(err error) {
 	fmt.Printf("\n") // flush stdout
 
-	os.Stderr.WriteString(fmt.Sprintf("waldo: %v\n", err))
+	os.Stderr.WriteString(fmt.Sprintf("waldo-upload: %v\n", err))
 
 	os.Exit(1)
 }
@@ -95,60 +263,42 @@ func main() {
 
 	checkInputs()
 
-	uploader := waldo.NewUploader(
-		waldoBuildPath,
-		waldoUploadToken,
-		waldoVariantName,
-		waldoGitCommit,
-		waldoGitBranch,
-		waldoVerbose,
-		map[string]string{
-			"wrapperName":    wrapperName,
-			"wrapperVersion": wrapperVersion})
+	prepareSource()
+	prepareTarget()
 
-	if err := uploader.Validate(); err != nil {
-		fail(err)
-	}
+	defer cleanupTarget()
 
-	displaySummary(uploader)
-
-	fmt.Printf("Uploading build to Waldo\n")
-
-	if err := uploader.Upload(); err != nil {
-		fail(err)
-	}
-
-	fmt.Printf("\nBuild ‘%s’ successfully uploaded to Waldo!\n", filepath.Base(waldoBuildPath))
-
-	os.Exit(0)
+	downloadAgent()
+	execAgent()
 }
 
-func summarize(value string) string {
-	if len(value) > 0 {
-		return fmt.Sprintf("‘%s’", value)
-	} else {
-		return "(none)"
+func prepareSource() {
+	stepAssetURL = determineAssetURL()
+}
+
+func prepareTarget() {
+	stepWorkingPath = determineWorkingPath()
+	stepAgentPath = determineAgentPath()
+
+	err := os.RemoveAll(stepWorkingPath)
+
+	if err == nil {
+		err = os.MkdirAll(stepWorkingPath, 0755)
+	}
+
+	if err != nil {
+		fail(err)
 	}
 }
 
-func summarizeSecure(value string) string {
-	if len(value) == 0 {
-		return "(none)"
-	}
+func setEnvironVar(env *[]string, key, value string) {
+	for idx := range *env {
+		if strings.HasPrefix((*env)[idx], key+"=") {
+			(*env)[idx] = key + "=" + value
 
-	if !waldoVerbose {
-		prefixLen := len(value)
-
-		if prefixLen > 6 {
-			prefixLen = 6
+			return
 		}
-
-		prefix := value[0:prefixLen]
-		suffixLen := len(value) - len(prefix)
-		secure := "********************************"
-
-		value = prefix + secure[0:suffixLen]
 	}
 
-	return fmt.Sprintf("‘%s’", value)
+	*env = append(*env, key+"="+value)
 }
