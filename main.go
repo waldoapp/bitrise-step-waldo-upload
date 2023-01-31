@@ -14,9 +14,11 @@ import (
 
 const (
 	stepName    = "Waldo Upload Bitrise Step"
-	stepVersion = "2.3.0"
+	stepVersion = "2.3.1"
 
 	stepAssetBaseURL = "https://github.com/waldoapp/waldo-go-agent/releases"
+
+	stepMaxDownloadAttempts = 2
 )
 
 var (
@@ -129,12 +131,12 @@ func determineWorkingPath() string {
 
 func displayVersion() {
 	if stepVerbose {
-		fmt.Printf("%s %s (%s/%s)\n", stepName, stepVersion, stepPlatform, stepArch)
+		fmt.Printf("%s %s (%s/%s)\n\n", stepName, stepVersion, stepPlatform, stepArch)
 	}
 }
 
-func downloadAgent() {
-	// fmt.Printf("\nDownloading latest Waldo Agent…\n\n")
+func downloadAgent(retryAllowed bool) bool {
+	// fmt.Printf("Downloading latest Waldo Agent…\n\n")
 
 	client := &http.Client{}
 
@@ -148,13 +150,27 @@ func downloadAgent() {
 		resp, err = client.Do(req)
 	}
 
+	if retryAllowed && err != nil {
+		emitError(err)
+
+		return true // did not succeed but retry is allowed
+	}
+
 	if err == nil {
 		defer resp.Body.Close()
 
 		dumpResponse(resp, false)
 
 		if resp.StatusCode < 200 || resp.StatusCode > 299 {
-			fail(fmt.Errorf("Unable to download Waldo Agent, HTTP status: %s", resp.Status))
+			err = fmt.Errorf("Unable to download Waldo Agent, HTTP status: %s", resp.Status)
+
+			if retryAllowed && shouldRetry(resp) {
+				emitError(err)
+
+				return true // did not succeed but retry is allowed
+			}
+
+			fail(err)
 		}
 	}
 
@@ -172,6 +188,20 @@ func downloadAgent() {
 
 	if err != nil {
 		fail(fmt.Errorf("Unable to download Waldo Agent, error: %v, url: %s", err, stepAssetURL))
+	}
+
+	return false // don’t bother to retry
+}
+
+func downloadAgentWithRetry() {
+	for attempts := 1; attempts <= stepMaxDownloadAttempts; attempts++ {
+		retry := downloadAgent(attempts < stepMaxDownloadAttempts)
+
+		if !retry {
+			break
+		}
+
+		fmt.Printf("\nFailed download attempts: %d -- retrying…\n\n", attempts)
 	}
 }
 
@@ -193,6 +223,12 @@ func dumpResponse(resp *http.Response, body bool) {
 			fmt.Printf("\n--- Response ---\n%s\n", dump)
 		}
 	}
+}
+
+func emitError(err error) {
+	fmt.Printf("\n") // flush stdout
+
+	os.Stderr.WriteString(fmt.Sprintf("waldo-upload: %v\n", err))
 }
 
 func enrichEnvironment() []string {
@@ -245,9 +281,7 @@ func execAgent() {
 }
 
 func fail(err error) {
-	fmt.Printf("\n") // flush stdout
-
-	os.Stderr.WriteString(fmt.Sprintf("waldo-upload: %v\n", err))
+	emitError(err)
 
 	os.Exit(1)
 }
@@ -268,7 +302,8 @@ func main() {
 
 	defer cleanupTarget()
 
-	downloadAgent()
+	downloadAgentWithRetry()
+
 	execAgent()
 }
 
@@ -301,4 +336,14 @@ func setEnvironVar(env *[]string, key, value string) {
 	}
 
 	*env = append(*env, key+"="+value)
+}
+
+func shouldRetry(resp *http.Response) bool {
+	switch resp.StatusCode {
+	case 408, 429, 500, 502, 503, 504:
+		return true
+
+	default:
+		return false
+	}
 }
