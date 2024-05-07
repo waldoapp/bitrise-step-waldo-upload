@@ -23,7 +23,6 @@ support_url: https://github.com/waldoapp/bitrise-step-waldo-upload/issues
 project_type_tags:
   - ios
   - android
-  - xamarin
   - react-native
   - cordova
   - ionic
@@ -62,7 +61,7 @@ inputs:
       title: "Variant name"
       summary: An optional variant name.
       description: |
-        An arbitrary string to associate with this build.
+        This is an arbitrary string to associate with this build.
       is_required: false
   - git_commit:
     opts:
