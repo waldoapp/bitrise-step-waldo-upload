@@ -97,3 +97,11 @@ inputs:
       value_options:
         - "yes"
         - "no"
+outputs:
+- WALDO_BUILD_ID:
+  opts:
+    title: "Build ID"
+    summary: The ID of the uploaded build.
+    description: |
+      This is a unique identifier for the build that you just uploaded. Empty if
+      the upload failed.

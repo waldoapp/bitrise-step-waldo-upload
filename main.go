@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bufio"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,11 +12,14 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
+
+	"github.com/bitrise-io/go-utils/command"
 )
 
 const (
 	stepName    = "Waldo Upload Bitrise Step"
-	stepVersion = "2.3.1"
+	stepVersion = "2.4.0"
 
 	stepAssetBaseURL = "https://github.com/waldoapp/waldo-go-agent/releases"
 
@@ -39,9 +44,16 @@ var (
 	inputVerbose     = os.Getenv("is_debug_mode") == "yes"
 )
 
-func checkInputs() {
+type UploadMetadata struct {
+	AppID        string    `json:"appID"`
+	AppVersionID string    `json:"appVersionID"`
+	Host         string    `json:"host"`
+	UploadTime   time.Time `json:"uploadTime"`
+}
+
+func checkInputs() error {
 	if len(inputBuildPath) == 0 {
-		fail(fmt.Errorf("Missing required input: ‘build_path’"))
+		return fmt.Errorf("Missing required input: ‘build_path’")
 	}
 
 	if len(inputUploadToken) == 0 {
@@ -49,8 +61,10 @@ func checkInputs() {
 	}
 
 	if len(inputUploadToken) == 0 {
-		fail(fmt.Errorf("Missing required input: ‘upload_token’"))
+		return fmt.Errorf("Missing required input: ‘upload_token’")
 	}
+
+	return nil
 }
 
 func cleanupTarget() {
@@ -125,6 +139,36 @@ func determineAssetURL() string {
 	return assetBaseURL + "/" + assetName
 }
 
+func determineUploadArgs() []string {
+	args := []string{"upload"}
+
+	if len(inputGitBranch) > 0 {
+		args = append(args, "--git_branch", inputGitBranch)
+	}
+
+	if len(inputGitCommit) > 0 {
+		args = append(args, "--git_commit", inputGitCommit)
+	}
+
+	if len(inputUploadToken) > 0 {
+		args = append(args, "--upload_token", inputUploadToken)
+	}
+
+	if len(inputVariantName) > 0 {
+		args = append(args, "--variant_name", inputVariantName)
+	}
+
+	if inputVerbose {
+		args = append(args, "--verbose")
+	}
+
+	if buildPath := os.Getenv("build_path"); len(buildPath) > 0 {
+		args = append(args, buildPath)
+	}
+
+	return args
+}
+
 func determineWorkingPath() string {
 	return filepath.Join(os.TempDir(), fmt.Sprintf("WaldoUpdate-%d", os.Getpid()))
 }
@@ -135,7 +179,7 @@ func displayVersion() {
 	}
 }
 
-func downloadAgent(retryAllowed bool) bool {
+func downloadAgent(retryAllowed bool) (bool, error) {
 	// fmt.Printf("Downloading latest Waldo Agent…\n\n")
 
 	client := &http.Client{}
@@ -153,7 +197,7 @@ func downloadAgent(retryAllowed bool) bool {
 	if retryAllowed && err != nil {
 		emitError(err)
 
-		return true // did not succeed but retry is allowed
+		return true, nil // did not succeed but retry is allowed
 	}
 
 	if err == nil {
@@ -167,10 +211,10 @@ func downloadAgent(retryAllowed bool) bool {
 			if retryAllowed && shouldRetry(resp) {
 				emitError(err)
 
-				return true // did not succeed but retry is allowed
+				return true, nil // did not succeed but retry is allowed
 			}
 
-			fail(err)
+			return false, err
 		}
 	}
 
@@ -187,22 +231,26 @@ func downloadAgent(retryAllowed bool) bool {
 	}
 
 	if err != nil {
-		fail(fmt.Errorf("Unable to download Waldo Agent, error: %v, url: %s", err, stepAssetURL))
+		return false, fmt.Errorf("Unable to download Waldo Agent, error: %v, url: %s", err, stepAssetURL)
 	}
 
-	return false // don’t bother to retry
+	return false, nil // don’t bother to retry
 }
 
-func downloadAgentWithRetry() {
-	for attempts := 1; attempts <= stepMaxDownloadAttempts; attempts++ {
-		retry := downloadAgent(attempts < stepMaxDownloadAttempts)
+func downloadAgentWithRetry() error {
+	var err error
 
-		if !retry {
+	for attempts := 1; attempts <= stepMaxDownloadAttempts; attempts++ {
+		retry, err := downloadAgent(attempts < stepMaxDownloadAttempts)
+
+		if !retry || err != nil {
 			break
 		}
 
 		fmt.Printf("\nFailed download attempts: %d -- retrying…\n\n", attempts)
 	}
+
+	return err
 }
 
 func dumpRequest(req *http.Request, body bool) {
@@ -240,48 +288,66 @@ func enrichEnvironment() []string {
 	return env
 }
 
-func execAgent() {
-	args := []string{"upload"}
-
-	if len(inputGitBranch) > 0 {
-		args = append(args, "--git_branch", inputGitBranch)
-	}
-
-	if len(inputGitCommit) > 0 {
-		args = append(args, "--git_commit", inputGitCommit)
-	}
-
-	if len(inputUploadToken) > 0 {
-		args = append(args, "--upload_token", inputUploadToken)
-	}
-
-	if len(inputVariantName) > 0 {
-		args = append(args, "--variant_name", inputVariantName)
-	}
-
-	if inputVerbose {
-		args = append(args, "--verbose")
-	}
-
-	if buildPath := os.Getenv("build_path"); len(buildPath) > 0 {
-		args = append(args, buildPath)
-	}
+func execAgent() error {
+	args := determineUploadArgs()
 
 	cmd := exec.Command(stepAgentPath, args...)
 
 	cmd.Env = enrichEnvironment()
 	cmd.Stderr = os.Stderr
-	cmd.Stdout = os.Stdout
 
-	err := cmd.Run()
+	stdout, err := prepareStdout(cmd)
+
+	if err != nil {
+		return err
+	}
+
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+
+	data, err := readLastNonEmptyLine(stdout)
+
+	if err != nil {
+		return err
+	}
+
+	if err := cmd.Wait(); err != nil {
+		return err
+	}
+
+	buildID, err := extractBuildID(data)
+
+	if err != nil {
+		return err
+	}
+
+	return exportEnvironmentWithEnvman("WALDO_BUILD_ID", buildID)
+}
+
+func exportEnvironmentWithEnvman(keyStr, valueStr string) error {
+	cmd := command.New("envman", "add", "--key", keyStr)
+
+	cmd.SetStdin(strings.NewReader(valueStr))
+
+	return cmd.Run()
+}
+
+func extractBuildID(data []byte) (string, error) {
+	um := &UploadMetadata{}
+
+	if err := json.Unmarshal(data, um); err != nil {
+		return "", err
+	}
+
+	return um.AppVersionID, nil
+}
+func fail(err error) {
+	emitError(err)
 
 	if ee, ok := err.(*exec.ExitError); ok {
 		os.Exit(ee.ExitCode())
 	}
-}
-
-func fail(err error) {
-	emitError(err)
 
 	os.Exit(1)
 }
@@ -295,35 +361,78 @@ func main() {
 
 	displayVersion()
 
-	checkInputs()
+	if err := performUpload(); err != nil {
+		fail(err)
+	}
+}
 
-	prepareSource()
-	prepareTarget()
+func performUpload() error {
+	if err := checkInputs(); err != nil {
+		return err
+	}
+
+	if err := prepareSource(); err != nil {
+		return err
+	}
+
+	if err := prepareTarget(); err != nil {
+		return err
+	}
 
 	defer cleanupTarget()
 
-	downloadAgentWithRetry()
+	if err := downloadAgentWithRetry(); err != nil {
+		return err
+	}
 
-	execAgent()
+	return execAgent()
+
 }
 
-func prepareSource() {
+func prepareSource() error {
 	stepAssetURL = determineAssetURL()
+
+	return nil
 }
 
-func prepareTarget() {
+func prepareStdout(cmd *exec.Cmd) (io.Reader, error) {
+	pr, err := cmd.StdoutPipe()
+
+	if err != nil {
+		return nil, err
+	}
+
+	return io.TeeReader(pr, os.Stdout), nil
+}
+
+func prepareTarget() error {
 	stepWorkingPath = determineWorkingPath()
 	stepAgentPath = determineAgentPath()
 
 	err := os.RemoveAll(stepWorkingPath)
 
-	if err == nil {
-		err = os.MkdirAll(stepWorkingPath, 0755)
+	if err != nil {
+		return err
 	}
 
-	if err != nil {
-		fail(err)
+	return os.MkdirAll(stepWorkingPath, 0755)
+}
+
+func readLastNonEmptyLine(r io.Reader) ([]byte, error) {
+	scanner := bufio.NewScanner(r)
+
+	var lastLine []byte
+
+	for scanner.Scan() {
+		if line := scanner.Bytes(); len(line) > 0 {
+			lastLine = scanner.Bytes()
+		}
 	}
+	if err := scanner.Err(); err != nil {
+		return []byte{}, err
+	}
+
+	return lastLine, nil
 }
 
 func setEnvironVar(env *[]string, key, value string) {
