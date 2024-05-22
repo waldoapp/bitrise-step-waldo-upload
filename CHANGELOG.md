@@ -7,6 +7,12 @@ This project adheres to [Semantic Versioning].
 
 ## [Unreleased]
 
+## [2.4.1] - 2024-05-22
+
+### Changed
+
+- Revert required Go version to 1.18.
+
 ## [2.4.0] - 2024-05-07
 
 ### Added
@@ -72,7 +78,8 @@ This project adheres to [Semantic Versioning].
 
 Initial public release.
 
-[Unreleased]:   https://github.com/waldoapp/gh-action-upload/compare/v2.4.0...HEAD
+[Unreleased]:   https://github.com/waldoapp/gh-action-upload/compare/v2.4.1...HEAD
+[2.4.1]:        https://github.com/waldoapp/gh-action-upload/compare/v2.4.0...v2.4.1
 [2.4.0]:        https://github.com/waldoapp/gh-action-upload/compare/v2.3.1...v2.4.0
 [2.3.1]:        https://github.com/waldoapp/gh-action-upload/compare/v2.3.0...v2.3.1
 [2.3.0]:        https://github.com/waldoapp/gh-action-upload/compare/v2.2.0...v2.3.0
