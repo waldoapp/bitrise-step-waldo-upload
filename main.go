@@ -19,7 +19,7 @@ import (
 
 const (
 	stepName    = "Waldo Upload Bitrise Step"
-	stepVersion = "2.4.0"
+	stepVersion = "2.4.1"
 
 	stepAssetBaseURL = "https://github.com/waldoapp/waldo-go-agent/releases"
 
